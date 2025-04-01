@@ -1,94 +1,124 @@
-import 'dotenv/config';
 import Discord from 'discord-simple-api';
-import chalk from 'chalk';
 import { GeminiService } from './services/geminiService.js';
+import dotenv from 'dotenv';
+import chalk from 'chalk';
 
-let bot;
-let gemini;
+dotenv.config();
+
+// Initialize Discord client and Gemini service
+const bot = new Discord(process.env.BOT_TOKEN);
+const gemini = new GeminiService();
 let lastMessageId = null;
-const responseChance = process.env.RESPONSE_CHANCE || 0.8;
+let lastResponseTime = 0;
+const COOLDOWN = 45000; // 45 seconds cooldown to match Gemini's rate limit
+const WAIT_AFTER_COOLDOWN = 2000; // 2 seconds after cooldown
+const TOTAL_WAIT = 47000; // 47 seconds total
 
-async function startBot() {
+let botUserId = null;
+
+// Initialize services
+async function initializeServices() {
   try {
-    // Test Gemini connection first
-    console.log(chalk.yellow('Initializing Gemini AI...'));
-    gemini = new GeminiService();
+    // Test Gemini connection
+    console.log(chalk.blue('[START] Initializing services...'));
     await gemini.init();
-    console.log(chalk.green('✓ Gemini AI initialized successfully'));
-
-    // Initialize Discord bot
-    console.log(chalk.yellow('\nConnecting to Discord...'));
-    bot = new Discord(process.env.BOT_TOKEN);
     
-    // Get and display bot information
+    // Get bot information
     const userInfo = await bot.getUserInformation();
-    const me = userInfo.username + '#' + userInfo.discriminator;
+    botUserId = userInfo.id;
+    console.log(chalk.green(`[SUCCESS] Logged in as ${userInfo.username}#${userInfo.discriminator} (ID: ${botUserId})`));
     
-    // Display all startup information
-    console.log(chalk.green('✓ Connected to Discord as %s'), me);
-    console.log(chalk.cyan('\nBot Configuration:'));
-    console.log(chalk.cyan('• Checking messages every 20 seconds'));
-    console.log(chalk.cyan('• Response chance: %s%'), responseChance * 100);
-    console.log(chalk.cyan('• Channel ID: %s'), process.env.CHANNEL_ID);
-    console.log(chalk.green('\nBot is ready and listening for messages!'));
-    
-    // Start checking messages
-    setInterval(processNewMessages, 20000);
+    // Start message processing
+    console.log(chalk.blue('[START] Bot is running and monitoring messages...'));
+    console.log(chalk.yellow(`[INFO] Cooldown: ${COOLDOWN/1000}s, Check interval: ${COOLDOWN/1000}s`));
+    setInterval(processMessage, COOLDOWN);
   } catch (error) {
-    console.error(chalk.red('Startup error:'), error.message);
+    console.error(chalk.red('[ERROR] Failed to initialize services:'), error.message);
     process.exit(1);
   }
 }
 
-async function processNewMessages() {
+// Message handling function
+async function processMessage() {
   try {
+    const currentTime = Date.now();
+    
+    // Check if we're in cooldown period
+    if (currentTime - lastResponseTime < COOLDOWN) {
+      const remainingCooldown = Math.ceil((COOLDOWN - (currentTime - lastResponseTime)) / 1000);
+      console.log(chalk.yellow(`[COOLDOWN] Waiting: ${remainingCooldown}s remaining`));
+      return;
+    }
+
+    // Wait 2 seconds after cooldown
+    if (currentTime - lastResponseTime < COOLDOWN + WAIT_AFTER_COOLDOWN) {
+      const remainingWait = Math.ceil((COOLDOWN + WAIT_AFTER_COOLDOWN - (currentTime - lastResponseTime)) / 1000);
+      console.log(chalk.yellow(`[WAIT] Additional time: ${remainingWait}s remaining`));
+      return;
+    }
+
+    console.log(chalk.blue('[FETCH] Checking for new messages...'));
     const messages = await bot.getMessagesInChannel(process.env.CHANNEL_ID, 1);
-    if (!messages || messages.length === 0) return;
+    if (!messages || messages.length === 0) {
+      console.log(chalk.yellow('[FETCH] No new messages found'));
+      return;
+    }
 
     const latestMessage = messages[0];
-
-    if (latestMessage.id === lastMessageId || latestMessage.author.bot) {
+    if (latestMessage.author.bot || latestMessage.id === lastMessageId) {
+      console.log(chalk.yellow('[FETCH] Message already processed or from bot'));
       return;
     }
 
-    if (Math.random() > responseChance) {
-      lastMessageId = latestMessage.id;
-      return;
-    }
-
-    const response = await gemini.generateContent(latestMessage.content);
+    // Check if bot was tagged
+    const isTagged = latestMessage.mentions?.users?.some(user => user.id === botUserId);
     
-    // Simplified message sending format
-    const messageContent = {
-      content: response,
-      reply: {
-        messageReference: latestMessage.id,
-        failIfNotExists: false
+    console.log(chalk.blue(`[MESSAGE] New message from ${latestMessage.author.username}:`));
+    console.log(chalk.cyan(`Content: ${latestMessage.content}`));
+    console.log(chalk.yellow(`[TAG] Bot was ${isTagged ? 'tagged' : 'not tagged'}`));
+
+    // Generate response using Gemini
+    console.log(chalk.blue('[GEMINI] Requesting response...'));
+    const responseText = await gemini.generateContent(latestMessage.content);
+
+    // Truncate if too long
+    if (responseText.length > 2000) {
+      responseText = responseText.substring(0, 1997) + "...";
+    }
+
+    // Send message with reply
+    console.log(chalk.blue('[DISCORD] Sending response...'));
+    const sentMessage = await bot.sendMessageToChannel(
+      process.env.CHANNEL_ID, 
+      responseText,
+      {
+        message_reference: {
+          message_id: latestMessage.id,
+          channel_id: process.env.CHANNEL_ID
+        }
       }
-    };
-    
-    await bot.sendMessageToChannel(process.env.CHANNEL_ID, messageContent);
-    console.log(
-      chalk.green('[REPLY] To: %s | Message: %s | Response: %s'),
-      latestMessage.author.username,
-      latestMessage.content,
-      response
     );
     
+    console.log(chalk.green('[SUCCESS] Message sent:'));
+    console.log(chalk.blue(`Original: ${latestMessage.content.substring(0, 50)}${latestMessage.content.length > 50 ? '...' : ''}`));
+    console.log(chalk.cyan(`Response: ${responseText.substring(0, 50)}${responseText.length > 50 ? '...' : ''}`));
+    console.log(chalk.magenta(`[MODE] ${isTagged ? 'Direct Reply' : 'Last Message Reply'}`));
+
+    lastResponseTime = currentTime;
     lastMessageId = latestMessage.id;
+
   } catch (error) {
-    console.error(chalk.red('Error processing messages:'), error.message);
-    if (error.response) {
-      console.error(chalk.red('Error details:'), error.response.data);
+    console.error(chalk.red('[ERROR] Processing message:'), error);
+    if (error.response?.data) {
+      console.error(chalk.red('[ERROR] Discord API Error:'), JSON.stringify(error.response.data, null, 2));
     }
   }
 }
 
-// Start the bot with enhanced console output
-console.log(chalk.yellow('Starting Discord Chat Bot...'));
-console.log(chalk.yellow('----------------------------'));
+// Start the bot
+initializeServices();
 
-startBot().catch(error => {
-  console.error(chalk.red('Fatal error:'), error);
-  process.exit(1);
+// Error handling
+process.on('unhandledRejection', error => {
+  console.error(chalk.red('[ERROR] Unhandled promise rejection:'), error);
 }); 
