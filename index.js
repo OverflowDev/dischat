@@ -4,12 +4,12 @@ const colors = require('colors');
 const fs = require('fs');
 const readlineSync = require('readline-sync');
 const translate = require('translate-google');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const GeminiService = require('./src/services/geminiService');
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(
-  process.env.GEMINI_API_KEY || readlineSync.question('Enter your Gemini API key: ')
-);
+let gemini;
+let lastMessageId = null;
+const responseChance = process.env.RESPONSE_CHANCE || 0.8;
 
 function shouldUsePreviousSettings() {
   const envFileExists = fs.existsSync('.env');
@@ -43,8 +43,6 @@ const usePreviousSettings = shouldUsePreviousSettings();
 
 let botToken = process.env.BOT_TOKEN;
 let channelId = process.env.CHANNEL_ID;
-let responseChance = process.env.RESPONSE_CHANCE || 0.8;
-let lastMessageId = null; // Track the last message we responded to
 
 if (!usePreviousSettings) {
   botToken = readlineSync.question('Enter your Discord bot token: ', {
@@ -69,65 +67,57 @@ GEMINI_API_KEY=${process.env.GEMINI_API_KEY}`;
 
 let bot;
 
-try {
-  bot = new Discord(botToken);
-} catch (error) {
-  console.error(colors.red('Error initializing Discord bot:'), error.message);
-  process.exit(1);
-}
-
-async function generateResponse(message) {
+async function startBot() {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+    // Initialize and test Gemini
+    console.log(colors.yellow('Initializing Gemini AI...'));
+    gemini = new GeminiService();
+    await gemini.init();
+    console.log(colors.green('✓ Gemini AI initialized successfully'));
 
-    const prompt = `Generate a short, natural response to this Discord message: "${message}"
-Rules:
-- Keep it to 1-2 sentences maximum
-- Be casual and friendly
-- Use at most one emoji if appropriate
-- Don't repeat the original message content
-- Don't use phrases like "I see" or "I understand"`;
-
-    const result = await model.generateContent(prompt);
-    const response = result.response.text();
-    return response.trim();
-
+    // Initialize Discord bot
+    bot = new Discord(botToken);
+    const userInfo = await bot.getUserInformation();
+    const me = userInfo.username + '#' + userInfo.discriminator;
+    
+    console.log(colors.green('\nLogged in as %s'), me);
+    console.log(colors.yellow('Checking for new messages every 20 seconds'));
+    console.log(colors.yellow('Response chance: %s%'), responseChance * 100);
+    
+    // Start message checking
+    setInterval(processNewMessages, 20000);
   } catch (error) {
-    console.error(colors.red('Error generating response:'), error.message);
-    return "Sorry, I can't respond right now 😅";
+    console.error(colors.red('Startup error:'), error.message);
+    process.exit(1);
   }
 }
 
 async function processNewMessages() {
   try {
-    // Get only the latest message
-    const messages = await bot.getMessagesInChannel(channelId, 1);
+    const messages = await bot.getMessagesInChannel(process.env.CHANNEL_ID, 1);
     if (!messages || messages.length === 0) return;
 
     const latestMessage = messages[0];
 
     // Skip if we've already responded to this message or if it's from the bot
-    if (
-      latestMessage.id === lastMessageId || 
-      latestMessage.author.bot
-    ) {
+    if (latestMessage.id === lastMessageId || latestMessage.author.bot) {
       return;
     }
 
     // Random chance to respond
     if (Math.random() > responseChance) {
-      lastMessageId = latestMessage.id; // Mark as processed even if we skip it
+      lastMessageId = latestMessage.id;
       return;
     }
 
-    const response = await generateResponse(latestMessage.content);
+    const response = await gemini.generateContent(latestMessage.content);
     
     // Create a proper Discord reply
     const replyOptions = {
       content: response,
       message_reference: {
         message_id: latestMessage.id,
-        channel_id: channelId,
+        channel_id: process.env.CHANNEL_ID,
         guild_id: latestMessage.guild_id
       },
       allowed_mentions: {
@@ -135,7 +125,7 @@ async function processNewMessages() {
       }
     };
     
-    await bot.sendMessageToChannel(channelId, replyOptions);
+    await bot.sendMessageToChannel(process.env.CHANNEL_ID, replyOptions);
     console.log(
       colors.green('[REPLY] To: %s | Message: %s | Response: %s'),
       latestMessage.author.username,
@@ -143,28 +133,17 @@ async function processNewMessages() {
       response
     );
     
-    lastMessageId = latestMessage.id; // Update last processed message ID
-
+    lastMessageId = latestMessage.id;
   } catch (error) {
     console.error(colors.red('Error processing messages:'), error.message);
   }
 }
 
-// Initial connection message
-bot.getUserInformation()
-  .then((userInfo) => {
-    const me = userInfo.username + '#' + userInfo.discriminator;
-    console.log(colors.green('Logged in as %s'), me);
-    console.log(colors.yellow('Checking for new messages every 20 seconds'));
-    console.log(colors.yellow('Response chance: %s%'), responseChance * 100);
-    console.log(colors.cyan('Using Gemini AI for responses'));
-  })
-  .catch((error) => {
-    console.error(colors.red('Error getting user information:'), error.message);
-  });
-
-// Check for new messages every 20 seconds
-setInterval(processNewMessages, 20000);
+// Start the bot
+startBot().catch(error => {
+  console.error(colors.red('Fatal error:'), error);
+  process.exit(1);
+});
 
 // Add error handling
 process.on('unhandledRejection', (error) => {
