@@ -42,41 +42,32 @@ async function startBot() {
 
 async function processNewMessages() {
   try {
-    // Get only the latest message (simplified message processing)
     const messages = await bot.getMessagesInChannel(process.env.CHANNEL_ID, 1);
     if (!messages || messages.length === 0) return;
 
     const latestMessage = messages[0];
 
-    // Prevent duplicate responses by checking message ID
     if (latestMessage.id === lastMessageId || latestMessage.author.bot) {
       return;
     }
 
-    // Random chance to respond
     if (Math.random() > responseChance) {
       lastMessageId = latestMessage.id;
       return;
     }
 
-    // Generate concise response using Gemini
     const response = await gemini.generateContent(latestMessage.content);
     
-    // Proper Discord reply with tagging
-    const replyOptions = {
+    // Simplified message sending format
+    const messageContent = {
       content: response,
-      message_reference: {
-        message_id: latestMessage.id,
-        channel_id: process.env.CHANNEL_ID,
-        guild_id: latestMessage.guild_id
-      },
-      allowed_mentions: {
-        parse: ['users']
+      reply: {
+        messageReference: latestMessage.id,
+        failIfNotExists: false
       }
     };
     
-    // Send the reply
-    await bot.sendMessageToChannel(process.env.CHANNEL_ID, replyOptions);
+    await bot.sendMessageToChannel(process.env.CHANNEL_ID, messageContent);
     console.log(
       chalk.green('[REPLY] To: %s | Message: %s | Response: %s'),
       latestMessage.author.username,
@@ -87,6 +78,9 @@ async function processNewMessages() {
     lastMessageId = latestMessage.id;
   } catch (error) {
     console.error(chalk.red('Error processing messages:'), error.message);
+    if (error.response) {
+      console.error(chalk.red('Error details:'), error.response.data);
+    }
   }
 }
 
