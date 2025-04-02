@@ -17,8 +17,10 @@ export class GeminiService {
     this.model = this.genAI.getGenerativeModel({
       model: "gemini-1.5-flash",
       generationConfig: {
-        temperature: 0.9,
-        maxOutputTokens: 100,
+        temperature: 0.7,
+        maxOutputTokens: 50,
+        topP: 0.8,
+        topK: 40
       }
     });
     
@@ -69,47 +71,90 @@ export class GeminiService {
         return "Just a moment...";
       }
 
-      const prompt = `You are having a casual conversation in a Discord chat. 
-      Respond naturally to this message while keeping these rules in mind:
-      1. Keep responses concise and conversational (max 2-3 sentences)
-      2. Stay on topic with the message you're replying to
-      3. Don't use formal language or AI-like phrases
-      4. Engage directly with what was said
-      5. Be friendly but not overly enthusiastic
-      6. Use casual language and emojis occasionally
-      7. Don't suggest or recommend things
-      8. Don't apologize or use formal greetings
-      9. Keep it real and natural
+      const prompt = `You are casually chatting in a Discord server. Read and analyze this message, then respond naturally as a friend would.
 
-      Message to respond to: "${message}"`;
+      Guidelines for your response:
+      - Keep it super short and casual (1-2 sentences max)
+      - Match the tone and energy of the message
+      - Use natural language like a real person
+      - It's okay to use emojis occasionally, but don't overdo it
+      - Stay on topic and engage with what they said
+      - Don't be overly formal or robotic
+      - Never apologize or use greetings
+      - Avoid phrases like "I think", "Well", "Actually"
+      - Just jump right into your response
+
+      Analyze and respond to this message: "${message}"`;
 
       console.log(chalk.blue('[GEMINI] Generating response...'));
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response.text();
       
-      console.log(chalk.green('[GEMINI] Response generated successfully'));
+      // Try up to 3 times if we get an overload error
+      let attempts = 0;
+      let lastError = null;
       
-      this.lastCallTime = currentTime;
-      this.dailyRequestCount++;
+      while (attempts < 3) {
+        try {
+          const result = await this.model.generateContent(prompt);
+          const response = await result.response.text();
+          
+          console.log(chalk.green('[GEMINI] Response generated successfully'));
+          
+          this.lastCallTime = currentTime;
+          this.dailyRequestCount++;
 
-      // Clean up any AI-like phrases
-      const cleanedResponse = response
-        .replace(/^(I apologize|I'm sorry|Sorry|Let me|I would|I think)/gi, "")
-        .replace(/^(Actually|Well|You see|To answer|In response)/gi, "")
-        .trim();
+          // Clean up any AI-like phrases and format response
+          const cleanedResponse = response
+            .replace(/^(I apologize|I'm sorry|Sorry|Let me|I would|I think|I understand|I see|I feel)/gi, "")
+            .replace(/^(Actually|Well|You see|To answer|In response|Indeed|However|Moreover)/gi, "")
+            .replace(/^(As an AI|As a language model|I'm here to|I'm happy to|I'd be happy to)/gi, "")
+            .replace(/^(Hi|Hello|Hey|Greetings|Good morning|Good afternoon|Good evening)/gi, "")
+            .replace(/\b(please|kindly|feel free to)\b/gi, "")
+            .replace(/\s{2,}/g, " ")
+            .trim();
 
-      console.log(chalk.cyan('[GEMINI] Cleaned response:', cleanedResponse));
-      return cleanedResponse;
+          // If response is empty after cleaning, generate a simple reaction
+          if (!cleanedResponse) {
+            const reactions = ["👍", "💯", "😄", "Got it!", "Nice!", "Cool!", "For sure!"];
+            return reactions[Math.floor(Math.random() * reactions.length)];
+          }
+
+          console.log(chalk.cyan('[GEMINI] Cleaned response:', cleanedResponse));
+          return cleanedResponse;
+          
+        } catch (error) {
+          lastError = error;
+          if (error.message?.includes('overloaded')) {
+            attempts++;
+            console.log(chalk.yellow(`[GEMINI] Model overloaded, attempt ${attempts}/3...`));
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+            continue;
+          }
+          throw error; // If it's not an overload error, throw it immediately
+        }
+      }
+      
+      // If we get here, we failed all retries
+      console.error(chalk.red('[GEMINI] Failed after 3 attempts:'), lastError.message);
+      return "The server's a bit busy right now, but I'm still here! 😅";
+
     } catch (error) {
       console.error(chalk.red('[GEMINI] Error:'), error.message);
       if (error.response?.data) {
         console.error(chalk.red('[GEMINI] API Error:'), JSON.stringify(error.response.data, null, 2));
       }
+      
+      // Specific error responses
       if (error.status === 429) {
         console.log(chalk.yellow('[GEMINI] Rate limit hit, increasing delay'));
         this.rateLimitDelay = Math.min(this.rateLimitDelay * 1.5, 120000); // Max 2 minutes
+        return "I need a quick breather! 😅";
       }
-      return "Hmm... 🤔";
+      
+      if (error.message?.includes('API key')) {
+        return "Oops, having some technical difficulties! 🔧";
+      }
+      
+      return "I'm here, but having trouble thinking clearly! 🤔";
     }
   }
 } 

@@ -1,4 +1,7 @@
-import Discord from 'discord-simple-api';
+// Import dependencies
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const Discord = require('discord-simple-api');
 import { GeminiService } from './services/geminiService.js';
 import dotenv from 'dotenv';
 import chalk from 'chalk';
@@ -16,21 +19,28 @@ const TOTAL_WAIT = 47000; // 47 seconds total
 
 let botUserId = null;
 
+// Messages that don't need responses
+const skipPatterns = [
+  /^(ok|okay|alright|got it|nice|cool|thanks|ty|thx|k)\b/i,
+  /^(👍|✅|🆗|💯|✨|🙏)/,
+  /^(sure|yep|yup|yeah|yes|no|nope)\b/i,
+  /^(mhm|hmm|hm|ah|oh)\b/i
+];
+
 // Initialize services
 async function initializeServices() {
   try {
-    // Test Gemini connection
     console.log(chalk.blue('[START] Initializing services...'));
     await gemini.init();
     
     // Get bot information
     const userInfo = await bot.getUserInformation();
     botUserId = userInfo.id;
-    console.log(chalk.green(`[SUCCESS] Logged in as ${userInfo.username}#${userInfo.discriminator} (ID: ${botUserId})`));
+    console.log(chalk.green(`[SUCCESS] Logged in as ${userInfo.username} (ID: ${botUserId})`));
     
     // Start message processing
     console.log(chalk.blue('[START] Bot is running and monitoring messages...'));
-    console.log(chalk.yellow(`[INFO] Cooldown: ${COOLDOWN/1000}s, Check interval: ${COOLDOWN/1000}s`));
+    console.log(chalk.yellow(`[INFO] Cooldown: ${COOLDOWN/1000}s, Wait after: ${WAIT_AFTER_COOLDOWN/1000}s`));
     setInterval(processMessage, COOLDOWN);
   } catch (error) {
     console.error(chalk.red('[ERROR] Failed to initialize services:'), error.message);
@@ -50,7 +60,7 @@ async function processMessage() {
       return;
     }
 
-    // Wait 2 seconds after cooldown
+    // Wait additional time after cooldown
     if (currentTime - lastResponseTime < COOLDOWN + WAIT_AFTER_COOLDOWN) {
       const remainingWait = Math.ceil((COOLDOWN + WAIT_AFTER_COOLDOWN - (currentTime - lastResponseTime)) / 1000);
       console.log(chalk.yellow(`[WAIT] Additional time: ${remainingWait}s remaining`));
@@ -77,6 +87,12 @@ async function processMessage() {
     console.log(chalk.cyan(`Content: ${latestMessage.content}`));
     console.log(chalk.yellow(`[TAG] Bot was ${isTagged ? 'tagged' : 'not tagged'}`));
 
+    // Skip if message matches patterns that don't need responses
+    if (skipPatterns.some(pattern => pattern.test(latestMessage.content.trim()))) {
+      console.log(chalk.yellow('[SKIP] Message appears to be an acknowledgment:', latestMessage.content));
+      return;
+    }
+
     // Generate response using Gemini
     console.log(chalk.blue('[GEMINI] Requesting response...'));
     const responseText = await gemini.generateContent(latestMessage.content);
@@ -89,12 +105,19 @@ async function processMessage() {
     // Send message with reply
     console.log(chalk.blue('[DISCORD] Sending response...'));
     const sentMessage = await bot.sendMessageToChannel(
-      process.env.CHANNEL_ID, 
+      process.env.CHANNEL_ID,
       responseText,
       {
         message_reference: {
           message_id: latestMessage.id,
-          channel_id: process.env.CHANNEL_ID
+          channel_id: process.env.CHANNEL_ID,
+          guild_id: latestMessage.guild_id,
+          fail_if_not_exists: false
+        },
+        allowed_mentions: {
+          replied_user: true,
+          users: [latestMessage.author.id],
+          parse: ['users']
         }
       }
     );
