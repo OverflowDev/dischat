@@ -4,7 +4,7 @@ import chalk from 'chalk';
 
 dotenv.config();
 
-async function testGemini() {
+async function testFlash() {
   try {
     if (!process.env.GEMINI_API_KEY) {
       console.error(chalk.red('❌ GEMINI_API_KEY not found in .env file'));
@@ -65,4 +65,4 @@ async function testGemini() {
 }
 
 // Run the test
-testGemini(); 
+testFlash(); 
