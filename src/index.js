@@ -19,7 +19,6 @@ const WAIT_BETWEEN_MESSAGES = 30000; // 30 seconds between messages (2 per minut
 
 let botUserId = null;
 let isGeminiRateLimited = false;
-let lastTaggedMessage = null; // Store the last tagged message
 
 // Messages that don't need responses
 const skipPatterns = [
@@ -93,24 +92,13 @@ async function processMessage() {
     // Check if bot was tagged
     const isTagged = latestMessage.mentions?.users?.some(user => user.id === botUserId);
     
-    // If tagged, store the message and respond to it
-    if (isTagged) {
-      lastTaggedMessage = latestMessage;
-      console.log(chalk.blue(`[TAG] Bot was tagged by ${latestMessage.author.username}`));
-    }
-
-    // Determine which message to respond to
-    const messageToRespondTo = lastTaggedMessage || latestMessage;
-    const shouldTagUser = lastTaggedMessage !== null;
-
-    console.log(chalk.blue(`[MESSAGE] Processing message from ${messageToRespondTo.author.username}:`));
-    console.log(chalk.cyan(`[ORIGINAL] ${messageToRespondTo.content}`));
-    console.log(chalk.yellow(`[MODE] ${shouldTagUser ? 'Tagged Response' : 'Last Message Reply'}`));
+    console.log(chalk.blue(`[MESSAGE] New message from ${latestMessage.author.username}:`));
+    console.log(chalk.cyan(`[ORIGINAL] ${latestMessage.content}`));
+    console.log(chalk.yellow(`[TAG] Bot was ${isTagged ? 'tagged' : 'not tagged'}`));
 
     // Skip if message matches patterns that don't need responses
-    if (skipPatterns.some(pattern => pattern.test(messageToRespondTo.content.trim()))) {
-      console.log(chalk.yellow('[SKIP] Message appears to be an acknowledgment:', messageToRespondTo.content));
-      lastTaggedMessage = null; // Reset tagged message
+    if (skipPatterns.some(pattern => pattern.test(latestMessage.content.trim()))) {
+      console.log(chalk.yellow('[SKIP] Message appears to be an acknowledgment:', latestMessage.content));
       return;
     }
 
@@ -121,7 +109,7 @@ async function processMessage() {
     if (!isGeminiRateLimited) {
       try {
         console.log(chalk.blue('[GEMINI] Requesting response...'));
-        responseText = await gemini.generateContent(messageToRespondTo.content);
+        responseText = await gemini.generateContent(latestMessage.content);
         responseSource = 'gemini';
       } catch (error) {
         if (error.message.includes('rate limit')) {
@@ -135,7 +123,7 @@ async function processMessage() {
 
     // If Gemini failed or is rate limited, try pattern matching
     if (!responseText) {
-      responseText = patternService.findResponse(messageToRespondTo.content);
+      responseText = patternService.findResponse(latestMessage.content);
       responseSource = 'pattern';
       if (responseText) {
         console.log(chalk.cyan(`[PATTERN] Using pattern-based response`));
@@ -157,18 +145,18 @@ async function processMessage() {
     // Prepare message options
     const messageOptions = {
       message_reference: {
-        message_id: messageToRespondTo.id,
+        message_id: latestMessage.id,
         channel_id: process.env.CHANNEL_ID,
-        guild_id: messageToRespondTo.guild_id,
+        guild_id: latestMessage.guild_id,
         fail_if_not_exists: false
       }
     };
 
-    // Add user mention if this is a tagged response
-    if (shouldTagUser) {
+    // Add user mention if bot was tagged
+    if (isTagged) {
       messageOptions.allowed_mentions = {
         replied_user: true,
-        users: [messageToRespondTo.author.id],
+        users: [latestMessage.author.id],
         parse: ['users']
       };
     }
@@ -182,15 +170,13 @@ async function processMessage() {
     );
     
     console.log(chalk.green('[SUCCESS] Message sent:'));
-    console.log(chalk.blue(`[ORIGINAL] ${messageToRespondTo.content}`));
+    console.log(chalk.blue(`[ORIGINAL] ${latestMessage.content}`));
     console.log(chalk.cyan(`[RESPONSE] ${responseText}`));
     console.log(chalk.magenta(`[SOURCE] Response from: ${responseSource}`));
-    console.log(chalk.magenta(`[MODE] ${shouldTagUser ? 'Tagged Response' : 'Last Message Reply'}`));
+    console.log(chalk.magenta(`[MODE] ${isTagged ? 'Tagged Response' : 'Last Message Reply'}`));
     console.log(chalk.yellow(`[TIMING] Time since last response: ${Math.floor(timeSinceLastResponse/1000)}s`));
     console.log(chalk.yellow(`[TIMING] Next response available in: ${WAIT_BETWEEN_MESSAGES/1000}s`));
 
-    // Reset tagged message after responding
-    lastTaggedMessage = null;
     lastResponseTime = currentTime;
     lastMessageId = latestMessage.id;
 
