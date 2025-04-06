@@ -111,46 +111,50 @@ const skipPatterns = [
 // Enhanced Nigerian response styles with more variety
 const nigerianResponses = {
   greetings: [
-    "Wetin dey happen? 😎",
-    "How far na? ✨",
-    "Abeg wetin dey sup? 😂",
-    "Oya na, wetin dey? 🎉",
-    "My guy, long time! 😏",
-    "My guy! 🙌",
-    "Oshey baddest! 💫",
-    "Chaii, see who dey here! 🌟"
+    "Wetin dey happen",
+    "How far na",
+    "Abeg wetin dey sup",
+    "Oya na, wetin dey",
+    "My guy, long time",
+    "My guy",
+    "Oshey baddest",
+    "Chaii, see who dey here"
   ],
   acknowledgments: [
-    "Na you dey talk! 😂",
-    "You don talk am! 💯",
-    "Abeg no vex, I dey here! 😎",
-    "Oya na, I hear you! ✨",
-    "You sabi die! 📚",
-    "You get point sha! 👌",
-    "I feel you die! 💪",
-    "You no dey lie! 💯"
+    "Na you dey talk",
+    "You don talk am",
+    "Abeg no vex, I dey here",
+    "Oya na, I hear you",
+    "You sabi die",
+    "You get point sha",
+    "I feel you die",
+    "You no dey lie"
   ],
   reactions: [
-    "No be small thing o! 😂",
-    "E dey pain you? 😅",
-    "Abeg no wound me! 🤣",
-    "You too much! 💪",
-    "Na wa for you o! 😏",
-    "Omo mehn! 😱",
-    "E shock you? 😄",
-    "Wahala dey o! 🔥"
+    "No be small thing o",
+    "E dey pain you",
+    "Abeg no wound me",
+    "You too much",
+    "Na wa for you o",
+    "Omo mehn",
+    "E shock you",
+    "Wahala dey o"
   ],
   curious: [
-    "Tell me wetin sup! 👀",
-    "You get gist? 🤔",
-    "Wetin happen next? 🎬",
-    "Abeg continue! 😮"
+    "Tell me wetin sup",
+    "You get gist",
+    "Wetin happen next",
+    "Abeg continue",
+    "Wetin dey your mind",
+    "Talk am make I hear",
+    "Wetin dey your head",
+    "Abeg yarn am"
   ],
   excited: [
-    "Omo mehn! 🔥",
-    "Chaii! See levels! 🎉",
-    "Na mad ting! 💫",
-    "E sweet me die! 🙌"
+    "Omo mehn",
+    "Chaii, see levels",
+    "Na mad ting",
+    "E sweet me die"
   ]
 };
 
@@ -172,6 +176,298 @@ const responseQueue = {
     this.messages = this.messages.filter(msg => msg.timestamp > fiveMinutesAgo);
   }
 };
+
+// User memory to track frequent users and their preferences
+const userMemory = {
+  users: {},
+  maxUsers: 50,
+  
+  addUser: function(userId, username) {
+    if (!this.users[userId]) {
+      this.users[userId] = {
+        username: username,
+        messageCount: 0,
+        lastInteraction: Date.now(),
+        topics: new Set(),
+        preferences: {},
+        typos: 0
+      };
+      
+      // Limit the number of users we track
+      const userIds = Object.keys(this.users);
+      if (userIds.length > this.maxUsers) {
+        // Remove oldest user
+        const oldestUserId = userIds.reduce((oldest, current) => 
+          this.users[current].lastInteraction < this.users[oldest].lastInteraction ? current : oldest
+        );
+        delete this.users[oldestUserId];
+      }
+    } else {
+      this.users[userId].lastInteraction = Date.now();
+    }
+    
+    this.users[userId].messageCount++;
+  },
+  
+  updateUserTopics: function(userId, topics) {
+    if (this.users[userId]) {
+      topics.forEach(topic => this.users[userId].topics.add(topic));
+    }
+  },
+  
+  getUserInfo: function(userId) {
+    return this.users[userId] || null;
+  },
+  
+  isFrequentUser: function(userId) {
+    return this.users[userId] && this.users[userId].messageCount > 5;
+  },
+  
+  getPreferredTopics: function(userId) {
+    return this.users[userId] ? Array.from(this.users[userId].topics) : [];
+  }
+};
+
+// Function to add occasional typos and corrections
+function addTypos(text, userId) {
+  // Skip if text is too short
+  if (text.length < 10) return text;
+  
+  // Get user's typo frequency
+  const userInfo = userMemory.getUserInfo(userId);
+  const typoChance = userInfo ? Math.min(0.15, userInfo.typos / 100) : 0.05;
+  
+  // Decide if we'll add a typo
+  if (Math.random() > typoChance) return text;
+  
+  // Common typos in Nigerian English
+  const typoPatterns = [
+    { from: 'the', to: 'd' },
+    { from: 'that', to: 'dat' },
+    { from: 'what', to: 'wetin' },
+    { from: 'you', to: 'u' },
+    { from: 'your', to: 'ur' },
+    { from: 'are', to: 'r' },
+    { from: 'for', to: '4' },
+    { from: 'to', to: '2' },
+    { from: 'too', to: '2' },
+    { from: 'two', to: '2' }
+  ];
+  
+  // Apply a random typo
+  const pattern = typoPatterns[Math.floor(Math.random() * typoPatterns.length)];
+  const words = text.split(' ');
+  const wordIndex = Math.floor(Math.random() * words.length);
+  
+  // Only replace if the word matches
+  if (words[wordIndex].toLowerCase() === pattern.from) {
+    words[wordIndex] = pattern.to;
+    
+    // Update user's typo count
+    if (userInfo) {
+      userMemory.users[userId].typos++;
+    }
+    
+    return words.join(' ');
+  }
+  
+  return text;
+}
+
+// Function to add corrections
+function addCorrection(text) {
+  // Skip if text is too short
+  if (text.length < 15) return text;
+  
+  // Decide if we'll add a correction (10% chance)
+  if (Math.random() > 0.1) return text;
+  
+  const corrections = [
+    " meant",
+    " oops",
+    " lol",
+    " sorry",
+    " nah",
+    " wait",
+    " actually"
+  ];
+  
+  const correction = corrections[Math.floor(Math.random() * corrections.length)];
+  return text + correction;
+}
+
+// Function to remove all formatting
+function removeFormatting(text) {
+  // Remove asterisks (bold/italic)
+  text = text.replace(/\*\*/g, '');
+  text = text.replace(/\*/g, '');
+  
+  // Remove underscores (italic/underline)
+  text = text.replace(/_/g, '');
+  
+  // Remove backticks (code)
+  text = text.replace(/`/g, '');
+  
+  // Remove quotes
+  text = text.replace(/"/g, '');
+  text = text.replace(/'/g, '');
+  
+  // Remove any other markdown formatting
+  text = text.replace(/~~/g, '');
+  text = text.replace(/>/g, '');
+  text = text.replace(/\|\|/g, '');
+  
+  // Remove all exclamation marks
+  text = text.replace(/!+/g, '');
+  
+  // Remove multiple question marks
+  text = text.replace(/\?+/g, '?');
+  
+  // Remove any repeated phrases at the end (like "We move." on a new line)
+  text = text.replace(/\n\s*([^.!?]+)[.!?]?\s*$/, '');
+  
+  return text;
+}
+
+// Function to vary response timing
+function getVariedResponseTime() {
+  // Base time is 30 seconds (2 messages per minute)
+  const baseTime = 30000;
+  
+  // Add random variation between -5 and +10 seconds
+  const variation = Math.floor(Math.random() * 15000) - 5000;
+  
+  // Ensure we don't go below 25 seconds or above 40 seconds
+  return Math.max(25000, Math.min(40000, baseTime + variation));
+}
+
+// Function to check if a response is too bot-like
+function isTooBotLike(text) {
+  // Check if it's just emojis
+  if (/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\s]+$/u.test(text)) {
+    return true;
+  }
+  
+  // Check if it's too short (less than 3 characters)
+  if (text.length < 3) {
+    return true;
+  }
+  
+  // Check if it's just a single word
+  if (!text.includes(' ') && text.length < 10) {
+    return true;
+  }
+  
+  return false;
+}
+
+// Function to make responses more natural
+function makeResponseMoreNatural(text) {
+  // Remove any emojis from the text
+  text = text.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+  
+  // If it's too bot-like, add some Nigerian filler words
+  if (isTooBotLike(text)) {
+    const fillers = [
+      "Omo mehn, ",
+      "Abeg, ",
+      "See ehn, ",
+      "My guy, ",
+      "Oya na, ",
+      "Chai, ",
+      "Ehen, ",
+      "Wetin dey, "
+    ];
+    
+    const filler = fillers[Math.floor(Math.random() * fillers.length)];
+    return filler + text;
+  }
+  
+  return text;
+}
+
+// Function to add occasional Nigerian filler words
+function addNigerianFillers(text) {
+  // Skip if text is too short
+  if (text.length < 10) return text;
+  
+  // 20% chance to add a filler
+  if (Math.random() > 0.2) return text;
+  
+  const fillers = [
+    "Omo mehn, ",
+    "Abeg, ",
+    "See ehn, ",
+    "My guy, ",
+    "Oya na, ",
+    "Chai, ",
+    "Ehen, ",
+    "Wetin dey, "
+  ];
+  
+  const filler = fillers[Math.floor(Math.random() * fillers.length)];
+  return filler + text;
+}
+
+// Function to add occasional Nigerian slang
+function addNigerianSlang(text) {
+  // Skip if text is too short
+  if (text.length < 15) return text;
+  
+  // 15% chance to add slang
+  if (Math.random() > 0.15) return text;
+  
+  const slang = [
+    " no be small thing o",
+    " e dey pain me",
+    " you too much",
+    " na wa for you o",
+    " omo mehn",
+    " e shock you",
+    " wahala dey o",
+    " you sabi die",
+    " you get point sha",
+    " i feel you die",
+    " you no dey lie"
+  ];
+  
+  const selectedSlang = slang[Math.floor(Math.random() * slang.length)];
+  return text + selectedSlang;
+}
+
+// Function to add natural punctuation
+function addNaturalPunctuation(text) {
+  // Skip if text is too short
+  if (text.length < 10) return text;
+  
+  // Remove any existing punctuation at the end
+  text = text.replace(/[.!?]+$/, '');
+  
+  // Remove all exclamation marks
+  text = text.replace(/!+/g, '');
+  
+  // Remove any repeated phrases at the end (like "We move." on a new line)
+  text = text.replace(/\n\s*([^.!?]+)[.!?]?\s*$/, '');
+  
+  // Remove multiple question marks
+  text = text.replace(/\?+/g, '?');
+  
+  // Decide on punctuation based on content and mood
+  const hasQuestion = text.toLowerCase().includes('wetin') || 
+                      text.toLowerCase().includes('how') || 
+                      text.toLowerCase().includes('what') ||
+                      text.toLowerCase().includes('why') ||
+                      text.toLowerCase().includes('when') ||
+                      text.toLowerCase().includes('where');
+  
+  // Add appropriate punctuation
+  if (hasQuestion) {
+    return text + "?";
+  } else {
+    // For statements, use a mix of periods and no punctuation
+    return Math.random() > 0.3 ? text + "." : text;
+  }
+}
 
 // Initialize services
 async function initializeServices() {
@@ -212,7 +508,7 @@ async function processMessage() {
     
     // Calculate time since last response
     const timeSinceLastResponse = currentTime - lastResponseTime;
-    const timeUntilNextResponse = Math.max(0, WAIT_BETWEEN_MESSAGES - timeSinceLastResponse);
+    const timeUntilNextResponse = Math.max(0, getVariedResponseTime() - timeSinceLastResponse);
     
     console.log(chalk.blue('[FETCH] Checking for new messages...'));
     const messages = await bot.getMessagesInChannel(process.env.CHANNEL_ID, 50);
@@ -342,6 +638,14 @@ async function sendResponse(messageToRespondTo, shouldTagUser, mentionType) {
   try {
     // Add message to chat memory
     chatMemory.addMessage(messageToRespondTo);
+    
+    // Update user memory
+    userMemory.addUser(messageToRespondTo.author.id, messageToRespondTo.author.username);
+    
+    // Extract topics from message
+    const words = messageToRespondTo.content.toLowerCase().split(/\s+/);
+    const topics = words.filter(word => word.length > 3);
+    userMemory.updateUserTopics(messageToRespondTo.author.id, topics);
 
     console.log(chalk.blue(`[MESSAGE] Processing message from ${messageToRespondTo.author.username}:`));
     console.log(chalk.cyan(`[ORIGINAL] ${messageToRespondTo.content}`));
@@ -353,26 +657,26 @@ async function sendResponse(messageToRespondTo, shouldTagUser, mentionType) {
       return;
     }
 
-    // Start typing indicator before processing response
-    try {
-      await bot.startTyping(process.env.CHANNEL_ID);
-      console.log(chalk.blue('[TYPING] Started typing indicator'));
-    } catch (error) {
-      console.log(chalk.yellow('[TYPING] Could not start typing indicator:', error.message));
-    }
-
     let responseText = null;
     let responseSource = '';
 
     // Get current conversation mood
     const mood = chatMemory.getMood();
+    
+    // Get user info for personalization
+    const userInfo = userMemory.getUserInfo(messageToRespondTo.author.id);
+    const isFrequentUser = userMemory.isFrequentUser(messageToRespondTo.author.id);
+    const userTopics = userMemory.getPreferredTopics(messageToRespondTo.author.id);
 
     // Try Gemini first if not rate limited
     if (!isGeminiRateLimited) {
       try {
         console.log(chalk.blue('[GEMINI] Requesting response...'));
         const context = chatMemory.getContext();
-        const prompt = `Previous chat context:\n${context}\n\nCurrent message to respond to: ${messageToRespondTo.content}\n\nRespond in a casual Nigerian style, using Nigerian slang and expressions naturally. Keep it very short (max 2 sentences) and fun. Match the current mood: ${mood}. Make it sound like a quick human response typed in 20 seconds or less.`;
+        const userContext = isFrequentUser ? 
+          `User ${messageToRespondTo.author.username} is a frequent user. Their preferred topics: ${userTopics.join(', ')}.` : '';
+        
+        const prompt = `Previous chat context:\n${context}\n\n${userContext}\nCurrent message to respond to: ${messageToRespondTo.content}\n\nRespond in a casual Nigerian style, using Nigerian slang and expressions naturally. Keep it very short (max 2 sentences) and fun. Match the current mood: ${mood}. Make it sound like a quick human response typed in 20 seconds or less. DO NOT use emojis in your response. DO NOT use any formatting like asterisks, quotes, or other styling. Use plain text only. DO NOT use exclamation marks at all. Use commas and periods naturally. DO NOT repeat the last part of your statement on a new line. DO NOT use multiple question marks.`;
         responseText = await gemini.generateContent(prompt);
         responseSource = 'gemini';
       } catch (error) {
@@ -418,6 +722,35 @@ async function sendResponse(messageToRespondTo, shouldTagUser, mentionType) {
       console.log(chalk.cyan(`[PATTERN] Using mood-based response (${mood})`));
     }
 
+    // Remove any emojis from the response
+    responseText = responseText.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+    
+    // Remove all formatting
+    responseText = removeFormatting(responseText);
+    
+    // Make sure the response isn't too bot-like
+    responseText = makeResponseMoreNatural(responseText);
+    
+    // Add occasional typos and corrections
+    responseText = addTypos(responseText, messageToRespondTo.author.id);
+    responseText = addCorrection(responseText);
+    
+    // Add Nigerian fillers and slang
+    responseText = addNigerianFillers(responseText);
+    responseText = addNigerianSlang(responseText);
+    
+    // Add natural punctuation
+    responseText = addNaturalPunctuation(responseText);
+    
+    // Final check to ensure no exclamation marks
+    responseText = responseText.replace(/!+/g, '');
+    
+    // Final check to ensure no multiple question marks
+    responseText = responseText.replace(/\?+/g, '?');
+    
+    // Final check to ensure no repeated phrases at the end
+    responseText = responseText.replace(/\n\s*([^.!?]+)[.!?]?\s*$/, '');
+
     // Truncate if too long
     if (responseText.length > 2000) {
       responseText = responseText.substring(0, 1997) + "...";
@@ -460,14 +793,6 @@ async function sendResponse(messageToRespondTo, shouldTagUser, mentionType) {
       }
     );
 
-    // Stop typing indicator after sending message
-    try {
-      await bot.stopTyping(process.env.CHANNEL_ID);
-      console.log(chalk.blue('[TYPING] Stopped typing indicator'));
-    } catch (error) {
-      console.log(chalk.yellow('[TYPING] Could not stop typing indicator:', error.message));
-    }
-
     // Store the bot's message ID for reply tracking
     lastBotMessageId = sentMessage.id;
     
@@ -480,6 +805,9 @@ async function sendResponse(messageToRespondTo, shouldTagUser, mentionType) {
     console.log(chalk.magenta(`[SOURCE] Response from: ${responseSource}`));
     console.log(chalk.magenta(`[MODE] ${shouldTagUser ? `${mentionType || 'Tagged'} Response` : 'Last Message Reply'}`));
     console.log(chalk.yellow(`[MOOD] Current conversation mood: ${mood}`));
+    if (isFrequentUser) {
+      console.log(chalk.green(`[USER] Responding to frequent user: ${messageToRespondTo.author.username}`));
+    }
 
     lastResponseTime = Date.now();
     lastMessageId = messageToRespondTo.id;
